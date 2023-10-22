@@ -1,4 +1,4 @@
-import { cloneDeepWith, isArray, isPlainObject as lodaslIsPlainObject, partial } from 'lodash';
+import _, { cloneDeepWith, isArray, isPlainObject as lodaslIsPlainObject, partial } from 'lodash';
 
 /**
  * A specialized version of `_.cloneDeep` which only clones arrays and plain
@@ -8,7 +8,7 @@ import { cloneDeepWith, isArray, isPlainObject as lodaslIsPlainObject, partial }
  * @param value The value to clone.
  * @returns The cloned value.
  */
-export const cloneDeep = partial(cloneDeepWith, undefined, (value: unknown) => {
+export const cloneDeep = partial(cloneDeepWith, _, (value: unknown) => {
   // Only clone primitives, arrays, and plain objects.
   if (!isArray(value) && !lodaslIsPlainObject(value)) {
     return value;

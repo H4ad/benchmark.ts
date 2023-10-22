@@ -1,14 +1,16 @@
 //#region Imports
 
-import { template } from 'lodash';
+import { result } from 'lodash';
 import { Benchmark } from './benchmark';
 import { getNextCounter, NOOP, support, uid } from './constants';
-import { Deferred } from './deferred';
+import { Deferred, TemplateData } from './deferred';
 import { _globalThis } from './environment';
 import { timer } from './timers/timers';
 import { isStringable } from './utils';
 
 //#endregion
+
+// TODO: Há um bug na compilação do benchmark linha 12, provavelmente ele não está fazendo inline do código.
 
 export type CompiledTimer = {
   ns: () => number;
@@ -20,6 +22,139 @@ export type CompiledTimer = {
  * The compiled timer reference.
  */
 export let compiledTimer: CompiledTimer = null;
+
+export type CompileFuntionBody = (id: string, template: TemplateData) => string;
+
+function compileFuncBodyDeferred(id: string, templateData: TemplateData) {
+  return `
+  var d${ id } = this;
+  var ${ templateData.fnArg } = d${ id };
+  var m${ id } = d${ id }.benchmark._original;
+  var f${ id } = m${ id }.fn;
+  var su${ id } = m${ id }.setup;
+  var td${ id } = m${ id }.teardown;
+
+  // When 'deferred.cycles' is '0' then...
+  if (!d${ id }.cycles) {
+    // set 'deferred.fn',
+    d${ id }.fn = function() {
+      var ${ templateData.fnArg } = d${ id };
+      
+      if(typeof f${ id }=="function") {
+        try{
+          ${ templateData.fn }
+        } catch (e${ id }) {
+          f${ id }(d${ id })
+        }
+      } else {
+        ${ templateData.fn }
+      }
+    };
+
+    // set 'deferred.teardown'
+    d${ id }.teardown=function() { 
+      d${ id }.cycles = 0;
+      
+      if (typeof td${ id } == "function") {
+        try {
+          ${ templateData.teardown }
+        } catch (e${ id }) {
+          td${ id }();
+        }
+      } else {
+        ${ templateData.teardown }
+      }
+    };
+    
+    // execute the benchmark's 'setup'
+    if (typeof su${ id } == "function") {
+      try {
+        ${ templateData.setup }
+      } catch (e${ id }) {
+        su${ id }();
+      }
+    } else {
+      ${ templateData.setup }
+    };
+
+    // start timer
+    t${ id }.start(d${ id });
+  }
+
+  // and then execute 'deferred.fn' and return a dummy object.
+  d${ id }.fn();
+
+  return { uid: "${ uid }" }'
+  `;
+}
+
+function compileFuncBodyNormal(id: string, templateData: TemplateData): string {
+  return `
+  var r${ id };
+  var s${ id };
+  var m${ id } = this;
+  var f${ id } = m${ id }.fn;
+  var i${ id } = m${ id }.count;
+  var n${ id } = t${ id }.ns;
+
+  ${ templateData.setup }
+  ${ templateData.begin };
+
+  while(i${ id }--) {
+    ${ templateData.fn }
+  }
+
+  ${ templateData.end };
+  ${ templateData.teardown }
+
+  return { elapsed: r${ id }, uid: "${ uid }" }`;
+}
+
+function compileFuncBodyFallback(stringable: boolean, decompilable: boolean, clone: Benchmark): CompileFuntionBody {
+  return (id: string, templateData: TemplateData) => {
+    const startFn = stringable || (decompilable && !clone.error)
+      ? `
+          function f${ id }() {
+            ${ templateData.fn }
+          }
+
+          var r${ id };
+          var s${ id };
+          var m${ id } = this;
+          var i${ id } = m${ id }.count
+        `
+      : `
+          var r${ id };
+          var s${ id };
+          var m${ id } = this;
+          var f${ id } = m${ id }.fn;
+          var i${ id } = m${ id }.count;
+        `;
+
+    return `
+      ${ startFn }
+
+      var n${ id } = t${ id }.ns;
+
+      ${ templateData.setup }
+      ${ templateData.begin };
+
+      m${ id }.f${ id } = f${ id };
+
+      while (i${ id }--) {
+        m${ id }.f${ id }();
+      }
+
+      ${ templateData.end };
+
+      delete m${ id }.f${ id };
+
+      ${ templateData.teardown }
+
+      return { elapsed: r${ id } };
+    `;
+  };
+}
 
 /**
  * Clocks the time taken to execute a test per cycle (secs).
@@ -58,23 +193,9 @@ export function clock(benchmarkOrDeferred: Benchmark | Deferred): number {
   // Compile in setup/teardown functions and the test loop.
   // Create a new compiled test, instead of using the cached `bench.compiled`,
   // to avoid potential engine optimizations enabled over the life of the test.
-  let funcBody = deferred
-    ? 'var d#=this,${fnArg}=d#,m#=d#.benchmark._original,f#=m#.fn,su#=m#.setup,td#=m#.teardown;' +
-    // When `deferred.cycles` is `0` then...
-    'if(!d#.cycles){' +
-    // set `deferred.fn`,
-    'd#.fn=function(){var ${fnArg}=d#;if(typeof f#=="function"){try{${fn}\n}catch(e#){f#(d#)}}else{${fn}\n}};' +
-    // set `deferred.teardown`,
-    'd#.teardown=function(){d#.cycles=0;if(typeof td#=="function"){try{${teardown}\n}catch(e#){td#()}}else{${teardown}\n}};' +
-    // execute the benchmark's `setup`,
-    'if(typeof su#=="function"){try{${setup}\n}catch(e#){su#()}}else{${setup}\n};' +
-    // start timer,
-    't#.start(d#);' +
-    // and then execute `deferred.fn` and return a dummy object.
-    '}d#.fn();return{uid:"${uid}"}'
-
-    : 'var r#,s#,m#=this,f#=m#.fn,i#=m#.count,n#=t#.ns;${setup}\n${begin};' +
-    'while(i#--){${fn}\n}${end};${teardown}\nreturn{elapsed:r#,uid:"${uid}"}';
+  let funcBody: CompileFuntionBody = deferred
+    ? compileFuncBodyDeferred
+    : compileFuncBodyNormal;
 
   let compiled = createCompiled(bench, decompilable, !!deferred, funcBody);
 
@@ -108,13 +229,7 @@ export function clock(benchmarkOrDeferred: Benchmark | Deferred): number {
 
   // Fallback when a test exits early or errors during pretest.
   if (!compiled && !deferred && !isEmpty) {
-    funcBody = (
-        stringable || (decompilable && !clone.error)
-          ? 'function f#(){${fn}\n}var r#,s#,m#=this,i#=m#.count'
-          : 'var r#,s#,m#=this,f#=m#.fn,i#=m#.count'
-      ) +
-      ',n#=t#.ns;${setup}\n${begin};m#.f#=f#;while(i#--){m#.f#()}${end};' +
-      'delete m#.f#;${teardown}\nreturn{elapsed:r#}';
+    funcBody = compileFuncBodyFallback(stringable, decompilable, clone);
 
     compiled = createCompiled(bench, decompilable, !!deferred, funcBody);
 
@@ -131,6 +246,7 @@ export function clock(benchmarkOrDeferred: Benchmark | Deferred): number {
       }
     }
   }
+
   // If no errors run the full test loop.
   if (!clone.error) {
     compiled = createCompiled(bench, decompilable, !!deferred, funcBody);
@@ -153,19 +269,20 @@ export function clock(benchmarkOrDeferred: Benchmark | Deferred): number {
 /**
  * Creates a compiled function from the given function `body`.
  */
-function createCompiled(bench: Benchmark, decompilable: boolean, deferred: boolean, body: string): Function {
+function createCompiled(bench: Benchmark, decompilable: boolean, deferred: boolean, compileFuncBody: CompileFuntionBody): Function {
   const fn = bench.fn;
   const fnArg = deferred ? getFirstArgument(fn) || 'deferred' : '';
   const nextUid = uid + getNextCounter();
+  const numberUid = /\d+/.exec(uid)[0];
 
   bench.templateData = {
     uid: nextUid,
-    setup: decompilable ? getSource(bench.setup) : interpolate(bench, nextUid, 'm#.setup()'),
-    fn: decompilable ? getSource(fn) : interpolate(bench, nextUid, 'm#.fn(' + fnArg + ')'),
+    setup: decompilable ? getSource(bench.setup) : `m${ numberUid }.setup()`,
+    fn: decompilable ? getSource(fn) : `m${ numberUid }.fn(${ fnArg })`,
     fnArg: fnArg,
-    teardown: decompilable ? getSource(bench.teardown) : interpolate(bench, nextUid, 'm#.teardown()'),
-    begin: interpolate(bench, nextUid, 's#=n#()'),
-    end: interpolate(bench, nextUid, 'r#=(n#()-s#)'),
+    teardown: decompilable ? getSource(bench.teardown) : `m${ numberUid }.teardown()`,
+    begin: `s${ numberUid } = n${ numberUid }()`,
+    end: `r${ numberUid } = (n${ numberUid }() - s${ numberUid })`,
   };
 
   // _.assign(templateData, {
@@ -206,37 +323,45 @@ function createCompiled(bench: Benchmark, decompilable: boolean, deferred: boole
   // }
   // Define `timer` methods.
 
+  const compiledStartBody = `
+    var n${ numberUid } = this.ns;
+
+    ${ bench.templateData.begin };
+
+    o${ numberUid }.elapsed = 0;
+    o${ numberUid }.timeStamp = s${ numberUid };
+  `;
+
+  const compiledStopBody = `
+    var n${ numberUid } = this.ns;
+    var s${ numberUid } = o${ numberUid }.timeStamp;
+
+    ${ bench.templateData.end };
+
+    o${ numberUid }.elapsed = r${ numberUid };
+  `;
+
   compiledTimer = {
     ns: timer.ns,
-    start: Function(
-      interpolate(bench, nextUid, 'o#'),
-      interpolate(bench, nextUid, 'var n#=this.ns,${begin};o#.elapsed=0;o#.timeStamp=s#'),
-    ) as CompiledTimer['start'],
-    stop: Function(
-      interpolate(bench, nextUid, 'o#'),
-      interpolate(bench, nextUid, 'var n#=this.ns,s#=o#.timeStamp,${end};o#.elapsed=r#'),
-    ) as CompiledTimer['stop'],
+    start: Function(`o${ numberUid }`, compiledStartBody) as CompiledTimer['start'],
+    stop: Function(`o${ numberUid }`, compiledStopBody) as CompiledTimer['stop'],
   };
+
+  const compiledBody = `
+    var global = window;
+    var clearTimeout = global.clearTimeout;
+    var setTimeout = global.setTimeout;
+
+    ${ compileFuncBody(numberUid, bench.templateData) }
+  `;
 
   // Create compiled test.
   const compiled = Function(
-    interpolate(bench, nextUid, 'window,t#'),
-    'var global = window, clearTimeout = global.clearTimeout, setTimeout = global.setTimeout;\n' + interpolate(bench, nextUid, body),
+    `window, t${ numberUid }`,
+    compiledBody,
   );
 
   return compiled;
-}
-
-/**
- * Interpolates a given template string.
- */
-function interpolate(bench: Benchmark, uid: string, string: string): string {
-  const numberUid = /\d+/.exec(uid)[0];
-
-  // Replaces all occurrences of `#` with a unique number and template tokens with content.
-  const text = string.replace(/\#/g, numberUid);
-
-  return template(text)(bench.templateData);
 }
 
 /**
@@ -256,12 +381,18 @@ function getFirstArgument(fn: Function | string): string {
  * @returns The function's source code.
  */
 function getSource(fn: Function | string): string {
-  const result = fn.toString()
-    // Trim string.
-    .replace(/^\s+|\s+$/g, '');
+  let fnString = isStringable(fn)
+    ? fn.toString()
+    // Escape the `{` for Firefox 1.
+    : support.decompilation
+      ? result(/^[^{]+\{([\s\S]*)\}\s*$/.exec(fn as any), 1) as string
+      : fn;
+
+  // Trim string.
+  fnString = (fnString as string || '').replace(/^\s+|\s+$/g, '');
 
   // Detect strings containing only the "use strict" directive.
-  return /^(?:\/\*+[\w\W]*?\*\/|\/\/.*?[\n\r\u2028\u2029]|\s)*(["'])use strict\1;?$/.test(result)
+  return /^(?:\/\*+[\w\W]*?\*\/|\/\/.*?[\n\r\u2028\u2029]|\s)*(["'])use strict\1;?$/.test(fnString)
     ? ''
-    : result;
+    : fnString;
 }

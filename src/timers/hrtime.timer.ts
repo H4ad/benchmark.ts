@@ -15,11 +15,12 @@ export class HrtimeTimerFactory implements TimerFactory {
   }
 
   public create(): Timer {
-    let now: [number, number];
-    const ns = process.hrtime;
-
     return {
-      ns: () => (now = ns())[0] + (now[1] / 1e9),
+      ns: () => {
+        let now: [number, number];
+
+        return (now = process.hrtime())[0] + (now[1] / 1e9);
+      },
       unit: 'ns',
       resolution: this.getResolution(),
     };
@@ -32,18 +33,12 @@ export class HrtimeTimerFactory implements TimerFactory {
     return getResolution(() => {
       const ns = process.hrtime;
 
-      let beginHr: [number, number];
-      let measuredHr: [number, number];
-      let measured: number;
-      let begin: number;
+      let measured: any;
+      let begin: any;
 
-      beginHr = ns();
-      begin = beginHr[0] + (beginHr[1] / 1e9);
+      begin = (begin = ns())[0] + (begin[1] / 1e9);
 
-      do {
-        measuredHr = ns();
-        measured = (measuredHr[0] + (measuredHr[1] / 1e9)) - begin;
-      } while (!measured);
+      while (!(measured = ((measured = ns())[0] + (measured[1] / 1e9)) - begin)) {}
 
       return measured;
     });

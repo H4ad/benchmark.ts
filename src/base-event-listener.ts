@@ -1,4 +1,4 @@
-import { Event } from './event';
+import { Event, isEvent } from './event';
 
 export type DefaultEvents = 'Start' | 'Cycle' | 'Abort' | 'Error' | 'Reset' | 'Complete';
 export type EventListener = (...args: any[]) => any;
@@ -139,7 +139,9 @@ export abstract class BaseEventListener {
     //   event = Event(type),
     //   events = object.events,
     //   args = (arguments[0] = event, arguments);
-    const event = new Event(type);
+    const event = isEvent(type) ? type : new Event(type);
+
+    args.unshift(event);
 
     if (!event.currentTarget)
       event.currentTarget = this;
@@ -152,7 +154,7 @@ export abstract class BaseEventListener {
 
     if (this.events.size > 0 && this.events.has(event.type)) {
       for (const listener of this.events.get(event.type).slice() || []) {
-        event.result = listener(...args);
+        event.result = listener.apply(this, args);
 
         if (event.result === false) {
           event.cancelled = true;

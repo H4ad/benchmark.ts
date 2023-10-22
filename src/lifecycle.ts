@@ -9,6 +9,7 @@ import { Deferred } from './deferred';
 import { _globalThis } from './environment';
 import { Event } from './event';
 import { Suite } from './suite';
+import { timer } from './timers/timers';
 import { getMean } from './timers/utils';
 
 //#endregion
@@ -47,12 +48,16 @@ export function cycle(deferredOrBenchmark: Deferred | Benchmark, options?: Cycle
   let count = clone.count;
   let times = clone.times;
 
+  // console.log('clone.running1', clone.running);
   // Continue, if not aborted between cycles.
   if (clone.running) {
     // `minTime` is set to `Benchmark.options.minTime` in `clock()`.
     cycles = ++clone.cycles;
     clocked = deferred ? deferred.elapsed : clock(clone);
+    // console.log('clocked', clocked);
     minTime = clone.minTime;
+    // console.log('clone.cycles', cycles);
+    // console.log('bench.cycles', bench.cycles);
 
     if (cycles > bench.cycles) {
       bench.cycles = cycles;
@@ -67,6 +72,7 @@ export function cycle(deferredOrBenchmark: Deferred | Benchmark, options?: Cycle
     }
   }
 
+  // console.log('clone.running2', clone.running);
   // Continue, if not errored.
   if (clone.running) {
     // Compute the time taken to complete last test cycle.
@@ -80,6 +86,7 @@ export function cycle(deferredOrBenchmark: Deferred | Benchmark, options?: Cycle
     // Do we need to do another cycle?
     clone.running = clocked < minTime;
 
+    // console.log('clone.running3', clone.running);
     if (clone.running) {
       // Tests may clock at `0` when `initCount` is a small number,
       // to avoid that we set its count to something a bit higher.
@@ -90,15 +97,18 @@ export function cycle(deferredOrBenchmark: Deferred | Benchmark, options?: Cycle
       if (count <= clone.count) {
         count += Math.ceil((minTime - clocked) / period);
       }
+      // console.log('count', count);
       clone.running = count != Infinity;
     }
   }
   // Should we exit early?
   event = new Event('cycle');
   clone.emit(event);
+  // console.log('event.aborted', event.aborted);
   if (event.aborted) {
     clone.abort();
   }
+  // console.log('clone.running4', clone.running);
   // Figure out what to do next.
   if (clone.running) {
     // Start a new cycle.
@@ -200,9 +210,9 @@ export function compute(bench: Benchmark, options: CycleOptions) {
     let clone: Benchmark = event.target;
     // clone = event.target,
     let done = bench.aborted;
-    let now = Date.now();
+    let now = timer.ns();
     let size = sample.push(clone.times.period);
-    let maxedOut = size >= minSamples && (elapsed += now - clone.times.timeStamp) / 1e3 > bench.maxTime;
+    let maxedOut = size >= minSamples && (elapsed += now - clone.times.timeStamp) > bench.maxTime;
     let times = bench.times;
     let varOf = function (sum, x) { return sum + Math.pow(x - mean, 2); };
 
@@ -410,13 +420,9 @@ export function invoke<T extends Benchmark, K extends keyof T, R extends Extract
       benches.shift();
     }
     // If we reached the last index then return `false`.
-    if (queued)
-      return benches.length;
-
-    if (index < result.length)
-      return index;
-
-    return false;
+    return (queued ? benches.length : index < result.length)
+      ? index
+      : (index = false as any);
   }
 
   // Juggle arguments.

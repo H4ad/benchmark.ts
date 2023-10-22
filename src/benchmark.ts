@@ -14,7 +14,7 @@ import { filter } from './utils';
 
 export type BenchmarkFn = () => (void | Promise<void>);
 export type BenchmarkValidOptions = 'async' | 'defer' | 'delay' | 'initCount' | 'maxTime' | 'minSamples' | 'minTime';
-export type BenchmarkOptions = Pick<Benchmark, BenchmarkValidOptions> & BaseEventOptions;
+export type BenchmarkOptions = Partial<Pick<Benchmark, BenchmarkValidOptions> & BaseEventOptions>;
 export type BenchmarkRunOptions = { async: boolean };
 
 /**
@@ -775,7 +775,7 @@ export class Benchmark extends BaseEventListener {
     this.running = true;
 
     this.count = this.initCount;
-    this.times.timeStamp = Date.now();
+    this.times.timeStamp = timer.ns();
     this.emit(event);
 
     if (!event.cancelled) {

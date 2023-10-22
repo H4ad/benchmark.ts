@@ -61,3 +61,7 @@ export class Event {
   public message: object | undefined;
 
 }
+
+export function isEvent(value: any): value is Event {
+  return value instanceof Event;
+}

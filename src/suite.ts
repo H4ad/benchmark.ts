@@ -480,7 +480,7 @@ export class Suite extends BaseEventListener {
       args: options,
       queued: options.queued,
       onStart: (event) => {
-        this.emit('start', event);
+        this.emit(event);
       },
       onCycle: (event) => {
         const bench = event.target;
@@ -489,12 +489,12 @@ export class Suite extends BaseEventListener {
           this.emit({ 'type': 'error', 'target': bench });
         }
 
-        this.emit('cycle', event);
+        this.emit(event);
         event.aborted = this.aborted;
       },
       onComplete: (event) => {
         this.running = false;
-        this.emit('complete', event);
+        this.emit(event);
       },
     });
 
